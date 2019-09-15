@@ -4,19 +4,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, TensorBoard
  
-# Importing Training Set
-dataset_train = pd.read_csv('Google_Stock_Price_Train.csv')
+# Importing Data Set
+dataset = pd.read_csv('acn.csv')
+
+dataset_train = dataset.iloc[:len(dataset) - 25, :]
+dataset_test = dataset.iloc[len(dataset) - 25:, :]
  
-cols = list(dataset_train)[1:5]
- 
-#Preprocess data for training by removing all commas
- 
-dataset_train = dataset_train[cols].astype(str)
-for i in cols:
-    for j in range(0,len(dataset_train)):
-        dataset_train[i][j] = dataset_train[i][j].replace(",","")
- 
-dataset_train = dataset_train.astype(float)
+cols = list(dataset_train)[1:6]
+dataset_train = dataset_train[cols]
+
+
  
  
 training_set = dataset_train.as_matrix() # Using multiple predictors.
@@ -35,8 +32,8 @@ sc_predict.fit_transform(training_set[:,0:1])
 X_train = []
 y_train = []
  
-n_future = 20  # Number of days you want to predict into the future
-n_past = 60  # Number of past days you want to use to predict the future
+n_future = 25  # Number of days you want to predict into the future
+n_past = 360  # Number of past days you want to use to predict the future
  
 for i in range(n_past, len(training_set_scaled) - n_future + 1):
     X_train.append(training_set_scaled[i - n_past:i, 0:5])
@@ -56,13 +53,18 @@ from keras.layers import Dropout
 regressor = Sequential()
  
 # Adding fist LSTM layer and Drop out Regularization
-regressor.add(LSTM(units=10, return_sequences=True, input_shape=(n_past, 4)))
- 
+regressor.add(LSTM(units=50, return_sequences=True, input_shape=(n_past, 5)))
+regressor.add(Dropout(0.3))
  
 # Part 3 - Adding more layers
 # Adding 2nd layer with some drop out regularization
-regressor.add(LSTM(units=4, return_sequences=False))
- 
+regressor.add(LSTM(units=50, return_sequences=True))
+regressor.add(Dropout(0.3))
+
+# Adding a third LSTM layer and some Dropout regularisation
+regressor.add(LSTM(units = 50))
+regressor.add(Dropout(0.3))
+
 # Output layer
 regressor.add(Dense(units=1, activation='linear'))
  
@@ -76,17 +78,16 @@ rlr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
 mcp = ModelCheckpoint(filepath='weights.h5', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True)
 tb = TensorBoard('logs')
  
-history = regressor.fit(X_train, y_train, shuffle=True, epochs=100,
-                        callbacks=[es, rlr,mcp, tb], validation_split=0.2, verbose=1, batch_size=64)
+history = regressor.fit(X_train, y_train, shuffle=True, epochs=100, callbacks=[es, rlr, mcp, tb], validation_split=0.2, verbose=1, batch_size=64)
  
  
 # Predicting the future.
 #--------------------------------------------------------
-# The last date for our training set is 30-Dec-2016.
+# The last date for our training set is 05-Aug-2019.
 # Lets now try predicting the stocks for the dates in the test set.
  
 # The dates on our test set are:
-# 3,4,5,6,9,10,11,12,13,17,18,19,20,23,24,25,26,27,30,31-Jan-2017
+# 6,7,8,9,12,13,14,15,16,19,20,21,22,23,26,27,28,29,30-Aug-2019 and 3,4,5,6,9,10-Sep-2019
  
 # Now, the latest we can predict into our test set is to the 19th since the last date on training is 30-Dec-2016. 
 # 20 days into the future from the latest day in our training set is 19-Dec-2016. Right?
@@ -94,12 +95,11 @@ history = regressor.fit(X_train, y_train, shuffle=True, epochs=100,
 # (Remember the last sample of our training set will predict the 19th of Jan 2017, the second last will predict the 18th, etc)
  
  
-# Lets first import the test_set.
-dataset_test = pd.read_csv('Google_Stock_Price_Test.csv')
-y_true = np.array(dataset_test['Open'])
+
+y_true = np.array(dataset_test['open'])
 #Trim the test set to first 12 entries (till the 19th)
 y_true = y_true[0:12]
-predictions = regressor.predict(X_train[-20:])
+predictions = regressor.predict(X_train[-25:])
  
  
 # We skip the 31-Dec, 1-Jan,2-Jan, etc to compare with the test_set
