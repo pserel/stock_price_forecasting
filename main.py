@@ -8,7 +8,7 @@ from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, T
 dataset = pd.read_csv('acn.csv')
 
 n_future = 25  # Number of days you want to predict into the future
-n_past = 360  # Number of past days you want to use to predict the future
+n_past = 25  # Number of past days you want to use to predict the future
 dataset_train = dataset.iloc[:len(dataset) - n_future - n_past, :]
 dataset_test = dataset.iloc[len(dataset) - n_future - n_past:, :]
  
@@ -30,7 +30,7 @@ sc_predict = StandardScaler()
  
 sc_predict.fit_transform(training_set[:,0:1])
  
-# Creating a data structure with 360 timesteps and 25 outputs
+# Creating a data structure with n_past timesteps and n_future outputs
 X_train = []
 y_train = []
  
@@ -54,21 +54,28 @@ from keras.layers import Dropout
 regressor = Sequential()
  
 # Adding fist LSTM layer and Drop out Regularization
-regressor.add(LSTM(units=50, return_sequences=True, input_shape=(n_past, 5)))
-regressor.add(Dropout(0.4))
+regressor.add(LSTM(units=100, return_sequences=True, input_shape=(n_past, 5)))
+regressor.add(Dropout(0.5))
  
 # Part 3 - Adding more layers
 # Adding 2nd layer with some drop out regularization
-regressor.add(LSTM(units=50, return_sequences=True))
-regressor.add(Dropout(0.4))
+regressor.add(LSTM(units=100, return_sequences=True))
+regressor.add(Dropout(0.5))
 
 # Adding a third LSTM layer and some Dropout regularisation
-regressor.add(LSTM(units = 50, return_sequences=True))
-regressor.add(Dropout(0.4))
+regressor.add(LSTM(units = 100, return_sequences=True))
+regressor.add(Dropout(0.5))
+#
+## Adding a fourth LSTM layer and some Dropout regularisation
+regressor.add(LSTM(units = 100, return_sequences=True))
+regressor.add(Dropout(0.5))
 
-# Adding a fourth LSTM layer and some Dropout regularisation
-regressor.add(LSTM(units = 50))
-regressor.add(Dropout(0.4))
+regressor.add(LSTM(units = 100, return_sequences=True))
+regressor.add(Dropout(0.5))
+
+
+regressor.add(LSTM(units = 100))
+regressor.add(Dropout(0.5))
 
 # Output layer
 regressor.add(Dense(units=n_future))
@@ -78,12 +85,12 @@ regressor.compile(optimizer='adam', loss="mean_squared_error")  # Can change los
  
 # Fitting RNN to training set using Keras Callbacks. Read Keras callbacks docs for more info.
  
-es = EarlyStopping(monitor='val_loss', min_delta=1e-10, patience=10, verbose=1)
-rlr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
+es = EarlyStopping(monitor='val_loss', min_delta=1e-10, patience=30, verbose=1)
+rlr = ReduceLROnPlateau(monitor='val_loss', factor=0.75, patience=5, verbose=1)
 mcp = ModelCheckpoint(filepath='weights.h5', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True)
 tb = TensorBoard('logs')
  
-history = regressor.fit(X_train, y_train, shuffle=True, epochs=100, callbacks=[es, rlr, mcp, tb], validation_split=0.2, verbose=1, batch_size=128)
+history = regressor.fit(X_train, y_train, shuffle=True, epochs=100, callbacks=[es, rlr, mcp, tb], validation_split=0.25, verbose=1, batch_size=16)
  
  
 # Predicting the future.
@@ -94,7 +101,7 @@ y_true = np.array(dataset_test.open[len(dataset_test) - n_future:])
 test_set = dataset_test.iloc[:len(dataset_test) - n_future,1:6].values
 test_set_scaled = sc.transform(test_set)
 
-# Creating a data structure with 360 timesteps and 25 outputs
+# Creating a data structure with n_past timesteps and n_future outputs
 X_test = []
 for i in range(0, n_past):
     X_test.append(test_set_scaled[i, 0:5])
@@ -105,7 +112,7 @@ X_test = np.reshape(X_test, (1, X_test.shape[0], X_test.shape[1]))
 
 predictions = regressor.predict(X_test)
 
-y_pred = sc_predict.inverse_transform(predictions).reshape(25,1)
+y_pred = sc_predict.inverse_transform(predictions).reshape(n_future,1)
 
 hfm, = plt.plot(y_pred, 'r', label='predicted_stock_price')
 hfm2, = plt.plot(y_true,'b', label = 'actual_stock_price')
@@ -119,9 +126,9 @@ plt.show()
 plt.close()
  
  
-train_predict = np.reshape(X_train[len(X_train)-1], (1, 360, 5))
+train_predict = np.reshape(X_train[len(X_train)-1], (1, n_past, 5))
 hfm, = plt.plot(sc_predict.inverse_transform(y_train[len(y_train)-1,:]), 'r', label='actual_training_stock_price')
-hfm2, = plt.plot(sc_predict.inverse_transform(regressor.predict(train_predict)).reshape(25,1),'b', label = 'predicted_training_stock_price')
+hfm2, = plt.plot(sc_predict.inverse_transform(regressor.predict(train_predict)).reshape(n_future,1),'b', label = 'predicted_training_stock_price')
  
 plt.legend(handles=[hfm,hfm2])
 plt.title('Predictions vs Actual Price')
