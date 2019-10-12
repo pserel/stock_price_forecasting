@@ -1,113 +1,97 @@
+#import os
+#abspath = os.path.abspath('') ## String which contains absolute path to the script file. Also getcwd()?
+#os.chdir(abspath) ## Setting up working directory
+
+# "".join([getcwd(),'\\scripts'])
+
 # Part 1 - Data Preprocessing
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, TensorBoard
+
+
+n_future = 25  # Number of days you want to predict into the future
+n_past = 25  # Number of past days you want to use to predict the future
+n_features = 5 # Number of features to use
  
-# Importing Training Set
-dataset_train = pd.read_csv('Google_Stock_Price_Train.csv')
+# Importing Data Set
+dataset = pd.read_csv('acn.csv')
+
+dataset_train = dataset.iloc[:len(dataset) - n_future - n_past, :]
+dataset_test = dataset.iloc[len(dataset) - n_future - n_past:, :]
  
-cols = list(dataset_train)[1:5]
- 
-#Preprocess data for training by removing all commas
- 
-dataset_train = dataset_train[cols].astype(str)
-for i in cols:
-    for j in range(0,len(dataset_train)):
-        dataset_train[i][j] = dataset_train[i][j].replace(",","")
- 
-dataset_train = dataset_train.astype(float)
- 
- 
+cols = list(dataset_train)[1:6]
+dataset_train = dataset_train[cols]
 training_set = dataset_train.as_matrix() # Using multiple predictors.
  
 # Feature Scaling
-from sklearn.preprocessing import StandardScaler
+from feature_scaling import feature_scaling
+sc = feature_scaling(training_set)[0]
+sc_predict = feature_scaling(training_set)[1]
+training_set_scaled = feature_scaling(training_set)[2]
  
-sc = StandardScaler()
-training_set_scaled = sc.fit_transform(training_set)
+
  
-sc_predict = StandardScaler()
- 
-sc_predict.fit_transform(training_set[:,0:1])
- 
-# Creating a data structure with 60 timesteps and 1 output
-X_train = []
-y_train = []
- 
-n_future = 20  # Number of days you want to predict into the future
-n_past = 60  # Number of past days you want to use to predict the future
- 
-for i in range(n_past, len(training_set_scaled) - n_future + 1):
-    X_train.append(training_set_scaled[i - n_past:i, 0:5])
-    y_train.append(training_set_scaled[i+n_future-1:i + n_future, 0])
- 
-X_train, y_train = np.array(X_train), np.array(y_train)
+# Creating a data structure with n_past timesteps and n_future outputs
+from lstm_data_structure import lstm_data_structure
+X_train, y_train = lstm_data_structure(training_set_scaled, 
+                                       n_past, 
+                                       n_future,
+                                       n_features = n_features)
  
 # Part 2 - Building the RNN
  
 # Import Libraries and packages from Keras
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import LSTM
-from keras.layers import Dropout
+from keras.wrappers.scikit_learn import KerasRegressor
  
-# Initializing the RNN
-regressor = Sequential()
- 
-# Adding fist LSTM layer and Drop out Regularization
-regressor.add(LSTM(units=10, return_sequences=True, input_shape=(n_past, 4)))
- 
- 
-# Part 3 - Adding more layers
-# Adding 2nd layer with some drop out regularization
-regressor.add(LSTM(units=4, return_sequences=False))
- 
-# Output layer
-regressor.add(Dense(units=1, activation='linear'))
- 
-# Compiling the RNN
-regressor.compile(optimizer='adam', loss="mean_squared_error")  # Can change loss to mean-squared-error if you require.
- 
-# Fitting RNN to training set using Keras Callbacks. Read Keras callbacks docs for more info.
- 
-es = EarlyStopping(monitor='val_loss', min_delta=1e-10, patience=10, verbose=1)
-rlr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
-mcp = ModelCheckpoint(filepath='weights.h5', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True)
-tb = TensorBoard('logs')
- 
-history = regressor.fit(X_train, y_train, shuffle=True, epochs=100,
-                        callbacks=[es, rlr,mcp, tb], validation_split=0.2, verbose=1, batch_size=64)
+# Getting Keras Callbacks. Read Keras callbacks docs for more info.
+from get_keras_callbacks import get_keras_callbacks
+callbacks = get_keras_callbacks(es_patience = 30,
+                                rlr_factor = 0.75,
+                                rlr_patience = 5)
+
+# Fitting RNN to training
+from build_lstm_regressor import build_lstm_regressor
+regressor = KerasRegressor(build_fn = build_lstm_regressor,
+                           n_lstm_layers = 6,
+                           drop_out = 0.5,
+                           n_units = 100,
+                           optimizer = 'adam', 
+                           n_past = n_past,
+                           n_future = n_future)
+history = regressor.fit(X_train, 
+                        y_train, 
+                        shuffle = True, 
+                        epochs = 100, 
+                        callbacks = callbacks, 
+                        validation_split = 0.25, 
+                        verbose = 1, 
+                        batch_size = 16)
  
  
 # Predicting the future.
-#--------------------------------------------------------
-# The last date for our training set is 30-Dec-2016.
-# Lets now try predicting the stocks for the dates in the test set.
+y_true = np.array(dataset_test.open[len(dataset_test) - n_future:])
  
-# The dates on our test set are:
-# 3,4,5,6,9,10,11,12,13,17,18,19,20,23,24,25,26,27,30,31-Jan-2017
- 
-# Now, the latest we can predict into our test set is to the 19th since the last date on training is 30-Dec-2016. 
-# 20 days into the future from the latest day in our training set is 19-Dec-2016. Right?
-# Notice that we dont have some days in our test set, what we can do is to take the last 20 samples from the training set. 
-# (Remember the last sample of our training set will predict the 19th of Jan 2017, the second last will predict the 18th, etc)
- 
- 
-# Lets first import the test_set.
-dataset_test = pd.read_csv('Google_Stock_Price_Test.csv')
-y_true = np.array(dataset_test['Open'])
-#Trim the test set to first 12 entries (till the 19th)
-y_true = y_true[0:12]
-predictions = regressor.predict(X_train[-20:])
- 
- 
-# We skip the 31-Dec, 1-Jan,2-Jan, etc to compare with the test_set
-predictions_to_compare = predictions[[3,4,5,6,9,10,11,12,13,17,18,19]]
-y_pred = sc_predict.inverse_transform(predictions_to_compare)
- 
- 
- 
+test_set = dataset_test.iloc[:len(dataset_test) - n_future,1:6].values
+test_set_scaled = sc.transform(test_set)
+
+# Creating a data structure with n_past timesteps and n_future outputs
+X_test = []
+for i in range(0, n_past):
+    X_test.append(test_set_scaled[i, 0:n_features])
+X_test = np.array(X_test)
+
+# Reshaping
+X_test = np.reshape(X_test, (1, X_test.shape[0], X_test.shape[1]))
+
+predictions = regressor.predict(X_test)
+
+y_pred = sc_predict.inverse_transform(predictions).reshape(n_future,1)
+
+# Get MAPE of hold-out predictions
+from get_mape import get_mape
+get_mape(y_true, y_pred)
+
 hfm, = plt.plot(y_pred, 'r', label='predicted_stock_price')
 hfm2, = plt.plot(y_true,'b', label = 'actual_stock_price')
  
@@ -119,10 +103,18 @@ plt.savefig('graph.png', bbox_inches='tight')
 plt.show()
 plt.close()
  
- 
- 
-hfm, = plt.plot(sc_predict.inverse_transform(y_train), 'r', label='actual_training_stock_price')
-hfm2, = plt.plot(sc_predict.inverse_transform(regressor.predict(X_train)),'b', label = 'predicted_training_stock_price')
+# Get MAPE of fitted values
+fitted_mape = []
+for i in range(0, len(X_train)):
+    train_predict = np.reshape(X_train[i], (1, n_past, n_features))
+    y_true_train = sc_predict.inverse_transform(y_train[i,:])
+    y_fitted = sc_predict.inverse_transform(regressor.predict(train_predict)).reshape(n_future,1)
+    fitted_mape.append(get_mape(y_true_train, y_fitted))
+
+np.median(fitted_mape)
+
+hfm, = plt.plot(sc_predict.inverse_transform(y_train[len(y_train)-1,:]), 'r', label='actual_training_stock_price')
+hfm2, = plt.plot(sc_predict.inverse_transform(regressor.predict(train_predict)).reshape(n_future,1),'b', label = 'predicted_training_stock_price')
  
 plt.legend(handles=[hfm,hfm2])
 plt.title('Predictions vs Actual Price')
